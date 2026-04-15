@@ -15,7 +15,9 @@ async function startServer() {
       timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
       type TEXT,
       description TEXT,
-      camera_id INTEGER
+      camera_id INTEGER,
+      confidence REAL,
+      params TEXT
     )
   `);
 
@@ -28,9 +30,9 @@ async function startServer() {
   });
 
   app.post("/api/events", (req, res) => {
-    const { type, description, camera_id } = req.body;
-    const info = db.prepare("INSERT INTO events (type, description, camera_id) VALUES (?, ?, ?)")
-      .run(type, description, camera_id);
+    const { type, description, camera_id, confidence, params } = req.body;
+    const info = db.prepare("INSERT INTO events (type, description, camera_id, confidence, params) VALUES (?, ?, ?, ?, ?)")
+      .run(type, description, camera_id, confidence || null, params || null);
     res.json({ id: info.lastInsertRowid });
   });
 
