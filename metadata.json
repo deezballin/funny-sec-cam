@@ -1,0 +1,8 @@
+{
+  "name": "ZION Vision Command",
+  "description": "A high-tech mission control dashboard for multi-camera surveillance with AI-powered vision analysis and real-time verbal deterrents.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
