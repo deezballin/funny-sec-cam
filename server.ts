@@ -15,11 +15,21 @@ async function startServer() {
       timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
       type TEXT,
       description TEXT,
-      camera_id INTEGER,
-      confidence REAL,
-      params TEXT
+      camera_id INTEGER
     )
   `);
+
+  // Migration: Add confidence and params if they don't exist
+  const tableInfo = db.prepare("PRAGMA table_info(events)").all() as any[];
+  const hasConfidence = tableInfo.some(col => col.name === "confidence");
+  const hasParams = tableInfo.some(col => col.name === "params");
+
+  if (!hasConfidence) {
+    db.exec("ALTER TABLE events ADD COLUMN confidence REAL");
+  }
+  if (!hasParams) {
+    db.exec("ALTER TABLE events ADD COLUMN params TEXT");
+  }
 
   app.use(express.json());
 

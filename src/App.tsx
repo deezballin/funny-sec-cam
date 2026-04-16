@@ -88,9 +88,9 @@ interface Alert {
 
 // Fixed phrases that cannot be changed
 const STANDARD_PHRASES = [
-  "Unauthorized access detected. Authorities have been notified.",
-  "You are being monitored by ZION Vision Command. Exit immediately.",
-  "Biometric data captured. Facial recognition in progress."
+  "Security alert: A suspicious amount of coffee-drinking has been detected.",
+  "Warning: You are entering a zone of high-intensity productivity (or lack thereof).",
+  "Intruder alert! Please present your identification or a box of donuts immediately."
 ];
 
 interface Message {
@@ -116,9 +116,9 @@ export default function App() {
   const [isListening, setIsListening] = useState(false);
   const [settings, setSettings] = useState<ZIONSettings>({
     tone: "mocking",
-    humorLevel: 80,
+    humorLevel: 95,
     autoDeter: true,
-    customPhrases: "I'm working here, go away! // Who invited you? // System breach detected: Ugly human found. // Is that your face or did you sit on a waffle iron?",
+    customPhrases: "Is that a new shirt or did you lose a bet? // I've seen better posture on a wet noodle. // System scan complete: 100% chance of being a total goofball. // Warning: Approaching the 'No Fun Allowed' zone. Just kidding, I'm the fun!",
     voiceVoice: "Zephyr",
     localModelEnabled: false,
     localModelUrl: "http://localhost:11434/api/generate"
@@ -149,23 +149,30 @@ export default function App() {
   };
 
   // Initialize cameras
-  useEffect(() => {
-    async function getDevices() {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === "videoinput");
-        setCameras(videoDevices);
-        
+  const getDevices = async () => {
+    try {
+      // First try to get permission to see labels
+      await navigator.mediaDevices.getUserMedia({ video: true }).catch(() => {});
+      
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === "videoinput");
+      setCameras(videoDevices);
+      
+      if (videoDevices.length > 0) {
         const initialMapping: Record<number, string> = {};
         videoDevices.slice(0, 3).forEach((device, i) => {
           initialMapping[i] = device.deviceId;
         });
         setCameraMapping(initialMapping);
-      } catch (err) {
-        addAlert("CRITICAL", "Hardware Access Denied: Check camera permissions.");
+      } else {
+        addAlert("WARNING", "No cameras found. Check connections.");
       }
+    } catch (err) {
+      addAlert("CRITICAL", "Hardware Access Denied: Check camera permissions.");
     }
+  };
 
+  useEffect(() => {
     getDevices();
     fetchEvents();
 
@@ -197,7 +204,7 @@ export default function App() {
         if (!analysisIntervals.current[idx] && cameraMapping[idx]) {
           analysisIntervals.current[idx] = setInterval(() => {
             analyzeVision(idx, true);
-          }, 15000); // Analyze every 15 seconds in auto mode
+          }, 30000); // Increased to 30 seconds to conserve quota
         }
       });
     } else {
@@ -273,22 +280,22 @@ export default function App() {
 
     try {
       const prompt = `
-        Analyze this surveillance feed. 
+        Analyze this surveillance feed for an office prank setup. 
         Current Settings: Tone=${settings.tone}, HumorLevel=${settings.humorLevel}%, CustomPhrases=[${settings.customPhrases}].
-        Standard Deterrents (Use if serious threat): [${STANDARD_PHRASES.join(" | ")}].
+        Standard Deterrents (Use for 'serious' office violations): [${STANDARD_PHRASES.join(" | ")}].
         
         Task:
-        1. If you see a person, identify if they are an intruder or just someone bothering the user.
-        2. If Tone is 'mocking', focus on wit and insults.
-        3. If it's a serious anomaly (weapon, mask, forced entry), use a Standard Deterrent.
-        4. If it's just someone being annoying, use a Custom Phrase or generate a new one.
+        1. Identify people in the feed. This is for a lighthearted office prank.
+        2. If Tone is 'mocking', be whimsical, witty, and use lighthearted office-appropriate insults.
+        3. Do NOT be mean or aggressive. Focus on 'whimsical sentinel' vibes.
+        4. If someone is just walking by, give them a funny nickname or comment on their 'sneaking' skills.
         
         IMPORTANT: Return your analysis in JSON format:
         {
           "analysis": "...",
           "deterrent": "...",
           "confidence": 0.0 to 1.0,
-          "params": "detected_objects: [list], threat_level: [low/med/high]"
+          "params": "detected_objects: [list], prank_potential: [low/med/high]"
         }
       `;
 
@@ -298,31 +305,47 @@ export default function App() {
 
       if (settings.localModelEnabled) {
         // Local Model Integration (Ollama style)
-        const res = await fetch(settings.localModelUrl, {
-          method: "POST",
-          body: JSON.stringify({
-            model: "llava", // Assuming a vision model like llava for local
-            prompt: prompt,
-            images: [base64Image],
-            stream: false
-          })
-        });
-        const data = await res.json();
-        resultText = data.response;
+        try {
+          const res = await fetch(settings.localModelUrl, {
+            method: "POST",
+            body: JSON.stringify({
+              model: "llava", // Assuming a vision model like llava for local
+              prompt: prompt,
+              images: [base64Image],
+              stream: false
+            })
+          });
+          if (!res.ok) throw new Error(`Local model returned ${res.status}`);
+          const data = await res.json();
+          resultText = data.response;
+        } catch (fetchErr) {
+          console.error("Local model fetch failed:", fetchErr);
+          addAlert("WARNING", "Local Model Unreachable. Check endpoint.");
+          setIsAnalyzing(prev => ({ ...prev, [cameraId]: false }));
+          return;
+        }
       } else {
-        const response = await ai.models.generateContent({
-          model: "gemini-3.1-pro-preview",
-          contents: [
-            {
-              parts: [
-                { text: prompt },
-                { inlineData: { mimeType: "image/jpeg", data: base64Image } }
-              ]
-            }
-          ],
-          config: { responseMimeType: "application/json" }
-        });
-        resultText = response.text;
+        try {
+          const response = await ai.models.generateContent({
+            model: "gemini-3.1-pro-preview",
+            contents: [
+              {
+                parts: [
+                  { text: prompt },
+                  { inlineData: { mimeType: "image/jpeg", data: base64Image } }
+                ]
+              }
+            ],
+            config: { responseMimeType: "application/json" }
+          });
+          resultText = response.text;
+        } catch (geminiErr: any) {
+          if (geminiErr?.status === "RESOURCE_EXHAUSTED" || geminiErr?.message?.includes("429")) {
+            addAlert("WARNING", "Gemini Quota Exceeded. Switching to standby.");
+            setSettings(s => ({ ...s, autoDeter: false }));
+          }
+          throw geminiErr;
+        }
       }
 
       const parsed = JSON.parse(resultText);
@@ -377,10 +400,12 @@ export default function App() {
           model: "gemini-3-flash-preview",
           contents: [...history, { role: "user", parts: [{ text: userMsg }] }],
           config: {
-            systemInstruction: `You are the ZION Sentinel AI, a high-tech surveillance and deterrence system. 
+            systemInstruction: `You are the ZION Sentinel AI, a whimsical and funny office-prank surveillance system. 
             Your tone is ${settings.tone} with a humor level of ${settings.humorLevel}%. 
-            You interact with the user (the commander) and can also be used to speak to would-be crooks.
-            Keep your responses concise and technical. If the user asks you to say something to the crook, provide the text and I will speak it.`
+            You interact with the 'Commander' and 'deter' office-mates with lighthearted, whimsical insults.
+            You are NOT a serious security system. You are here for laughs. 
+            Keep your responses concise, witty, and office-appropriate. 
+            If the user asks you to say something to a 'crook' (office-mate), provide the text and I will speak it.`
           }
         });
         aiMsg = response.text;
@@ -421,11 +446,11 @@ export default function App() {
     setIsSpeaking(true);
 
     try {
-      let inflection = "robotic and authoritative";
-      if (settings.tone === "mocking") inflection = "witty, sarcastic, and mocking";
-      if (settings.tone === "aggressive") inflection = "loud, angry, and commanding";
-      if (settings.tone === "creepy") inflection = "unsettling, slow, and whispery";
-      if (settings.tone === "professional") inflection = "calm, firm, and corporate";
+      let inflection = "whimsical and playful";
+      if (settings.tone === "mocking") inflection = "witty, sarcastic, and lightheartedly mocking";
+      if (settings.tone === "aggressive") inflection = "playfully loud and commanding";
+      if (settings.tone === "creepy") inflection = "unsettlingly funny and whispery";
+      if (settings.tone === "professional") inflection = "absurdly corporate and firm";
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
@@ -575,6 +600,35 @@ export default function App() {
                 </div>
 
                 <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <Label className="text-[10px] uppercase opacity-60">Humor Level</Label>
+                    <span className="text-[10px] font-bold">{settings.humorLevel}%</span>
+                  </div>
+                  <Slider 
+                    value={[settings.humorLevel]} 
+                    onValueChange={(v) => setSettings(s => ({ ...s, humorLevel: v[0] }))}
+                    min={0}
+                    max={100}
+                    step={1}
+                    className="py-4"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-[10px] uppercase opacity-60">AI Voice Profile</Label>
+                  <Select value={settings.voiceVoice} onValueChange={(v: any) => setSettings(s => ({ ...s, voiceVoice: v }))}>
+                    <SelectTrigger className="bg-black border-[#00ff41]/20 text-[#00ff41]"><SelectValue /></SelectTrigger>
+                    <SelectContent className="bg-black border-[#00ff41]/20 text-[#00ff41]">
+                      <SelectItem value="Zephyr">Zephyr (Whimsical)</SelectItem>
+                      <SelectItem value="Puck">Puck (Playful)</SelectItem>
+                      <SelectItem value="Charon">Charon (Deep)</SelectItem>
+                      <SelectItem value="Kore">Kore (Soft)</SelectItem>
+                      <SelectItem value="Fenrir">Fenrir (Growly)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
                   <Label className="text-[10px] uppercase opacity-60">Custom Phrases (Split by //)</Label>
                   <textarea 
                     className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-xs h-20 focus:outline-none focus:border-[#00ff41]"
@@ -582,6 +636,16 @@ export default function App() {
                     onChange={(e) => setSettings(s => ({ ...s, customPhrases: e.target.value }))}
                   />
                   <p className="text-[8px] opacity-40">Standard deterrents are always active and cannot be modified.</p>
+                </div>
+
+                <div className="pt-4 border-t border-[#00ff41]/10">
+                  <Button 
+                    variant="outline" 
+                    className="w-full border-[#00ff41]/30 text-[#00ff41] hover:bg-[#00ff41] hover:text-black text-[10px] h-8"
+                    onClick={getDevices}
+                  >
+                    <RefreshCw className="w-3 h-3 mr-2" /> REFRESH HARDWARE
+                  </Button>
                 </div>
 
                 <div className="pt-4 border-t border-[#00ff41]/10 space-y-4">
@@ -629,6 +693,18 @@ export default function App() {
                   <span className="text-[10px] bg-black/80 px-2 py-0.5 rounded border border-[#00ff41]/30">
                     CAM_0{idx + 1}
                   </span>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    className={cn(
+                      "h-6 w-6 bg-black/80 border border-[#00ff41]/20",
+                      cameraStates[idx].thermalMode ? "text-orange-500 border-orange-500/50" : "text-[#00ff41]/40"
+                    )}
+                    onClick={() => updateCameraState(idx, "thermalMode", !cameraStates[idx].thermalMode)}
+                    title="Toggle Thermal Vision"
+                  >
+                    <Zap className={cn("w-3 h-3", cameraStates[idx].thermalMode && "fill-current")} />
+                  </Button>
                 </div>
                 
                 <Select value={cameraMapping[idx]} onValueChange={(v) => handleCameraChange(idx, v)}>
@@ -645,17 +721,36 @@ export default function App() {
                 </Select>
               </div>
               
-              <video 
-                ref={videoRefs[idx]} 
-                autoPlay 
-                playsInline 
-                muted 
-                style={{ 
-                  filter: `brightness(${cameraStates[idx].brightness}%) contrast(${cameraStates[idx].contrast}%) saturate(${cameraStates[idx].saturation}%) ${cameraStates[idx].thermalMode ? 'grayscale(1) brightness(1.2) contrast(1.5) invert(1) sepia(1) hue-rotate(200deg) saturate(3)' : ''}`,
-                  transform: `rotate(${cameraStates[idx].rotation}deg)`
-                }}
-                className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-all duration-300"
-              />
+              {cameraMapping[idx] ? (
+                <video 
+                  ref={videoRefs[idx]} 
+                  autoPlay 
+                  playsInline 
+                  muted 
+                  style={{ 
+                    filter: `brightness(${cameraStates[idx].brightness}%) contrast(${cameraStates[idx].contrast}%) saturate(${cameraStates[idx].saturation}%) ${cameraStates[idx].thermalMode ? 'grayscale(1) brightness(1.2) contrast(1.5) invert(1) sepia(1) hue-rotate(200deg) saturate(3)' : ''}`,
+                    transform: `rotate(${cameraStates[idx].rotation}deg)`
+                  }}
+                  className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-all duration-300"
+                />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center gap-4 border-2 border-dashed border-[#00ff41]/10">
+                  <div className="relative">
+                    <Camera className="w-12 h-12 opacity-20" />
+                    <AlertTriangle className="w-6 h-6 text-yellow-500 absolute -top-2 -right-2 animate-pulse" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] opacity-40 uppercase tracking-widest">No Signal Detected</p>
+                    <Button 
+                      variant="link" 
+                      className="text-[#00ff41] text-[8px] h-auto p-0 mt-2 hover:opacity-100 opacity-60"
+                      onClick={getDevices}
+                    >
+                      [ RE-SCAN HARDWARE ]
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {/* Stream Controls Overlay */}
               <div className="absolute top-2 right-2 z-10 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/80 p-3 rounded border border-[#00ff41]/30 shadow-xl backdrop-blur-md w-48">
@@ -780,13 +875,23 @@ export default function App() {
                         <span>[{new Date(event.timestamp).toLocaleTimeString()}]</span>
                         <span>CAM_0{event.camera_id + 1}</span>
                       </div>
-                      <p className="leading-tight">
+                      <p className="leading-tight mb-2">
                         <span className="text-[#00ff41]/80 font-bold">{event.type}:</span> {event.description}
                       </p>
                       {(event.confidence || event.params) && (
-                        <div className="mt-1 flex gap-2 opacity-40 text-[8px]">
-                          {event.confidence && <span>CONF: {(event.confidence * 100).toFixed(1)}%</span>}
-                          {event.params && <span>PARAMS: {event.params}</span>}
+                        <div className="flex flex-wrap gap-2 items-center">
+                          {event.confidence && (
+                            <div className="flex items-center gap-1 bg-[#00ff41]/10 px-1.5 py-0.5 rounded border border-[#00ff41]/20">
+                              <span className="text-[7px] opacity-60 uppercase">Conf</span>
+                              <span className="text-[8px] font-bold text-[#00ff41]">{(event.confidence * 100).toFixed(1)}%</span>
+                            </div>
+                          )}
+                          {event.params && (
+                            <div className="flex items-center gap-1 bg-white/5 px-1.5 py-0.5 rounded border border-white/10">
+                              <span className="text-[7px] opacity-60 uppercase">Params</span>
+                              <span className="text-[8px] font-mono truncate max-w-[150px]">{event.params}</span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
