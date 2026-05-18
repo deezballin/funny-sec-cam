@@ -109,6 +109,10 @@ export default function App() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState<Record<number, boolean>>({ 0: false, 1: false, 2: false });
+  const [isDeterring, setIsDeterring] = useState<Record<number, boolean>>({ 0: false, 1: false, 2: false });
+  const [logFilter, setLogFilter] = useState("all");
+  const [cameraFilter, setCameraFilter] = useState<number | "all">("all");
+  const [chatCameraContext, setChatCameraContext] = useState(0);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -357,8 +361,12 @@ export default function App() {
       if (cleanAnalysis.toLowerCase().includes("person") || cleanAnalysis.toLowerCase().includes("intruder")) {
         logEvent(isAuto ? "AUTO_DETECTION" : "MANUAL_SCAN", cleanAnalysis, cameraId, confidence, params);
         if (cleanDeterrent) {
+          setIsDeterring(prev => ({ ...prev, [cameraId]: true }));
           speak(cleanDeterrent);
           setChatMessages(prev => [...prev, { role: "model", text: `[SENTINEL]: ${cleanDeterrent}` }]);
+          setTimeout(() => {
+            setIsDeterring(prev => ({ ...prev, [cameraId]: false }));
+          }, 5000);
         }
       }
     } catch (err) {
@@ -378,6 +386,19 @@ export default function App() {
     setIsChatLoading(true);
 
     try {
+      const recentEvents = events
+        .filter(e => e.camera_id === chatCameraContext)
+        .slice(0, 3)
+        .map(e => `[${e.type}] ${e.description}`)
+        .join("; ");
+
+      const contextPrompt = `
+        Current Context:
+        - Focusing on CAMERA_0${chatCameraContext + 1}
+        - Recent events for this camera: ${recentEvents || "No recent events."}
+        - User command: ${userMsg}
+      `;
+
       const history = chatMessages.map(m => ({
         role: m.role,
         parts: [{ text: m.text }]
@@ -398,14 +419,15 @@ export default function App() {
       } else {
         const response = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
-          contents: [...history, { role: "user", parts: [{ text: userMsg }] }],
+          contents: [...history, { role: "user", parts: [{ text: contextPrompt }] }],
           config: {
             systemInstruction: `You are the ZION Sentinel AI, a whimsical and funny office-prank surveillance system. 
             Your tone is ${settings.tone} with a humor level of ${settings.humorLevel}%. 
             You interact with the 'Commander' and 'deter' office-mates with lighthearted, whimsical insults.
             You are NOT a serious security system. You are here for laughs. 
             Keep your responses concise, witty, and office-appropriate. 
-            If the user asks you to say something to a 'crook' (office-mate), provide the text and I will speak it.`
+            If the user asks you to say something to a 'crook' (office-mate), provide the text and I will speak it.
+            You have access to the current camera context provided in the prompt.`
           }
         });
         aiMsg = response.text;
@@ -683,10 +705,23 @@ export default function App() {
         <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-4">
           {[0, 1, 2].map((idx) => (
             <Card key={idx} className={cn(
-              "bg-black border-[#00ff41]/20 overflow-hidden group relative",
+              "bg-black border-[#00ff41]/20 overflow-hidden group relative transition-all duration-500",
               idx === 0 && "md:col-span-2 aspect-video",
-              idx !== 0 && "aspect-video"
+              idx !== 0 && "aspect-video",
+              isDeterring[idx] && "border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)] ring-2 ring-red-500 ring-offset-2 ring-offset-black",
+              chatCameraContext === idx && "ring-1 ring-[#00ff41]/50"
             )}>
+              {isDeterring[idx] && (
+                <div className="absolute inset-0 bg-red-500/10 z-30 pointer-events-none flex items-center justify-center animate-pulse">
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1.5, opacity: 0 }}
+                    transition={{ repeat: Infinity, duration: 1 }}
+                    className="w-20 h-20 border-4 border-red-500 rounded-full"
+                  />
+                  <Laugh className="w-12 h-12 text-red-500 absolute" />
+                </div>
+              )}
               <div className="absolute top-2 left-2 z-10 flex flex-col gap-2">
                 <div className="flex items-center gap-2">
                   <div className={cn("w-2 h-2 rounded-full", isAnalyzing[idx] ? "bg-yellow-500 animate-pulse" : "bg-red-500 animate-ping")} />
@@ -704,6 +739,18 @@ export default function App() {
                     title="Toggle Thermal Vision"
                   >
                     <Zap className={cn("w-3 h-3", cameraStates[idx].thermalMode && "fill-current")} />
+                  </Button>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    className={cn(
+                      "h-6 w-6 bg-black/80 border border-[#00ff41]/20",
+                      chatCameraContext === idx ? "text-[#00ff41] bg-[#00ff41]/20 border-[#00ff41]" : "text-[#00ff41]/40"
+                    )}
+                    onClick={() => setChatCameraContext(idx)}
+                    title="Focus for Comms Context"
+                  >
+                    <UserCheck className="w-3 h-3" />
                   </Button>
                 </div>
                 
@@ -861,15 +908,45 @@ export default function App() {
           </Card>
 
           <Card className="bg-black border-[#00ff41]/20 h-[450px] flex flex-col">
-            <CardHeader className="p-4 pb-2 border-b border-[#00ff41]/10">
+            <CardHeader className="p-4 pb-2 border-b border-[#00ff41]/10 flex flex-row items-center justify-between">
               <CardTitle className="text-xs uppercase flex items-center gap-2">
                 <Terminal className="w-4 h-4" /> Detection_Log
               </CardTitle>
+              <div className="flex gap-1">
+                <Select value={cameraFilter.toString()} onValueChange={(v) => setCameraFilter(v === "all" ? "all" : parseInt(v))}>
+                  <SelectTrigger className="h-5 w-16 text-[7px] bg-black border-[#00ff41]/20">
+                    <SelectValue placeholder="CAM" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-black border-[#00ff41]/30">
+                    <SelectItem value="all" className="text-[8px]">ALL</SelectItem>
+                    <SelectItem value="0" className="text-[8px]">CAM 1</SelectItem>
+                    <SelectItem value="1" className="text-[8px]">CAM 2</SelectItem>
+                    <SelectItem value="2" className="text-[8px]">CAM 3</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={logFilter} onValueChange={setLogFilter}>
+                  <SelectTrigger className="h-5 w-20 text-[7px] bg-black border-[#00ff41]/20">
+                    <SelectValue placeholder="TYPE" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-black border-[#00ff41]/30">
+                    <SelectItem value="all" className="text-[8px]">ALL TYPES</SelectItem>
+                    <SelectItem value="AUTO_DETECTION" className="text-[8px]">AUTO</SelectItem>
+                    <SelectItem value="MANUAL_SCAN" className="text-[8px]">MANUAL</SelectItem>
+                    <SelectItem value="ALERT" className="text-[8px]">ALERT</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </CardHeader>
             <CardContent className="p-0 flex-1 overflow-hidden">
               <ScrollArea className="h-full p-4">
                 <div className="space-y-4">
-                  {events.map((event) => (
+                  {events
+                    .filter(e => {
+                      const camMatch = cameraFilter === "all" || e.camera_id === cameraFilter;
+                      const typeMatch = logFilter === "all" || e.type === logFilter;
+                      return camMatch && typeMatch;
+                    })
+                    .map((event) => (
                     <div key={event.id} className="text-[10px] border-l border-[#00ff41]/30 pl-3 py-1">
                       <div className="flex justify-between opacity-50 mb-1">
                         <span>[{new Date(event.timestamp).toLocaleTimeString()}]</span>
