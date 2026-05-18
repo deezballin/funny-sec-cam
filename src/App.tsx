@@ -163,7 +163,7 @@ export default function App() {
       setCameras(videoDevices);
       
       if (videoDevices.length > 0) {
-        const initialMapping: Record<number, string> = {};
+        const initialMapping: Record<number, string> = { 0: "", 1: "", 2: "" };
         videoDevices.slice(0, 3).forEach((device, i) => {
           initialMapping[i] = device.deviceId;
         });
@@ -610,7 +610,7 @@ export default function App() {
 
                 <div className="space-y-2">
                   <Label className="text-[10px] uppercase opacity-60">Deterrence Tone</Label>
-                  <Select value={settings.tone} onValueChange={(v: any) => setSettings(s => ({ ...s, tone: v }))}>
+                  <Select value={settings.tone || "mocking"} onValueChange={(v: any) => setSettings(s => ({ ...s, tone: v }))}>
                     <SelectTrigger className="bg-black border-[#00ff41]/20 text-[#00ff41]"><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-black border-[#00ff41]/20 text-[#00ff41]">
                       <SelectItem value="mocking">Mocking</SelectItem>
@@ -638,7 +638,7 @@ export default function App() {
 
                 <div className="space-y-2">
                   <Label className="text-[10px] uppercase opacity-60">AI Voice Profile</Label>
-                  <Select value={settings.voiceVoice} onValueChange={(v: any) => setSettings(s => ({ ...s, voiceVoice: v }))}>
+                  <Select value={settings.voiceVoice || "Zephyr"} onValueChange={(v: any) => setSettings(s => ({ ...s, voiceVoice: v }))}>
                     <SelectTrigger className="bg-black border-[#00ff41]/20 text-[#00ff41]"><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-black border-[#00ff41]/20 text-[#00ff41]">
                       <SelectItem value="Zephyr">Zephyr (Whimsical)</SelectItem>
@@ -754,7 +754,7 @@ export default function App() {
                   </Button>
                 </div>
                 
-                <Select value={cameraMapping[idx]} onValueChange={(v) => handleCameraChange(idx, v)}>
+                <Select value={cameraMapping[idx] || ""} onValueChange={(v) => handleCameraChange(idx, v)}>
                   <SelectTrigger className="h-6 w-32 bg-black/80 border-[#00ff41]/20 text-[8px] uppercase">
                     <SelectValue placeholder="Select Camera" />
                   </SelectTrigger>
@@ -913,7 +913,7 @@ export default function App() {
                 <Terminal className="w-4 h-4" /> Detection_Log
               </CardTitle>
               <div className="flex gap-1">
-                <Select value={cameraFilter.toString()} onValueChange={(v) => setCameraFilter(v === "all" ? "all" : parseInt(v))}>
+                <Select value={cameraFilter?.toString() || "all"} onValueChange={(v) => setCameraFilter(v === "all" ? "all" : parseInt(v))}>
                   <SelectTrigger className="h-5 w-16 text-[7px] bg-black border-[#00ff41]/20">
                     <SelectValue placeholder="CAM" />
                   </SelectTrigger>
@@ -924,7 +924,7 @@ export default function App() {
                     <SelectItem value="2" className="text-[8px]">CAM 3</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={logFilter} onValueChange={setLogFilter}>
+                <Select value={logFilter || "all"} onValueChange={setLogFilter}>
                   <SelectTrigger className="h-5 w-20 text-[7px] bg-black border-[#00ff41]/20">
                     <SelectValue placeholder="TYPE" />
                   </SelectTrigger>
