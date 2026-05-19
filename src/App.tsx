@@ -155,9 +155,7 @@ export default function App() {
   // Initialize cameras
   const getDevices = async () => {
     try {
-      // First try to get permission to see labels
       await navigator.mediaDevices.getUserMedia({ video: true }).catch(() => {});
-      
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(device => device.kind === "videoinput");
       setCameras(videoDevices);
@@ -285,7 +283,8 @@ export default function App() {
     try {
       const prompt = `
         Analyze this surveillance feed for an office prank setup. 
-        Current Settings: Tone=${settings.tone}, HumorLevel=${settings.humorLevel}%, CustomPhrases=[${settings.customPhrases}].
+        Current Settings: Tone=${settings.tone}, HumorLevel=${settings.humorLevel}%.
+        Custom Phrases to incorporate or use: [${settings.customPhrases}].
         Standard Deterrents (Use for 'serious' office violations): [${STANDARD_PHRASES.join(" | ")}].
         
         Task:
@@ -316,7 +315,10 @@ export default function App() {
               model: "llava", // Assuming a vision model like llava for local
               prompt: prompt,
               images: [base64Image],
-              stream: false
+              stream: false,
+              options: {
+                temperature: (settings.humorLevel / 100) * 1.5
+              }
             })
           });
           if (!res.ok) throw new Error(`Local model returned ${res.status}`);
@@ -340,7 +342,10 @@ export default function App() {
                 ]
               }
             ],
-            config: { responseMimeType: "application/json" }
+            config: { 
+              responseMimeType: "application/json",
+              temperature: 0.7 + (settings.humorLevel / 100) * 0.8
+            }
           });
           resultText = response.text;
         } catch (geminiErr: any) {
@@ -410,8 +415,11 @@ export default function App() {
           method: "POST",
           body: JSON.stringify({
             model: "llama3",
-            prompt: userMsg,
-            stream: false
+            prompt: contextPrompt,
+            stream: false,
+            options: {
+              temperature: (settings.humorLevel / 100) * 1.5
+            }
           })
         });
         const data = await res.json();
@@ -421,8 +429,10 @@ export default function App() {
           model: "gemini-3-flash-preview",
           contents: [...history, { role: "user", parts: [{ text: contextPrompt }] }],
           config: {
+            temperature: 0.7 + (settings.humorLevel / 100) * 0.8,
             systemInstruction: `You are the ZION Sentinel AI, a whimsical and funny office-prank surveillance system. 
             Your tone is ${settings.tone} with a humor level of ${settings.humorLevel}%. 
+            Custom phrases to integrate: ${settings.customPhrases}
             You interact with the 'Commander' and 'deter' office-mates with lighthearted, whimsical insults.
             You are NOT a serious security system. You are here for laughs. 
             Keep your responses concise, witty, and office-appropriate. 
@@ -475,7 +485,7 @@ export default function App() {
       if (settings.tone === "professional") inflection = "absurdly corporate and firm";
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
+        model: "gemini-3.1-flash-tts-preview",
         contents: [{ parts: [{ text: `Say with a ${inflection} voice: ${text}` }] }],
         config: {
           responseModalities: [Modality.AUDIO],
