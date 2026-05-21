@@ -134,6 +134,60 @@ export default function App() {
     uptime: "00:00:00"
   });
 
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const testLocalConnection = async () => {
+    setTestingConnection(true);
+    setTestResult(null);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+      const res = await fetch(settings.localModelUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "test_dummy_connection",
+          prompt: "test",
+          stream: false,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      
+      if (res.status === 404 || res.ok) {
+        setTestResult({
+          success: true,
+          message: "Endpoint reachable! Connection test successful.",
+        });
+        addAlert("INFO", "Local model endpoint is reachable.");
+      } else {
+        setTestResult({
+          success: false,
+          message: `Endpoint returned HTTP status ${res.status}.`,
+        });
+      }
+    } catch (err: any) {
+      console.warn("Local connection test fetch exception:", err);
+      let errorMsg = "Could not reach local model. Please ensure Ollama (or other LLM host) is running.";
+      if (!settings.localModelUrl.startsWith("https") && window.location.protocol === "https:") {
+        errorMsg = "Mixed Content block: Cannot fetch insecure 'http' URLs from this HTTPS dashboard. Please use a secure tunnel (e.g. ngrok: 'ngrok http 11434') or allow insecure local host connections in your browser.";
+      } else {
+        errorMsg += " Make sure you started your server with CORS origins enabled (e.g., 'OLLAMA_ORIGINS=* ollama serve').";
+      }
+      setTestResult({
+        success: false,
+        message: errorMsg,
+      });
+      addAlert("WARNING", "Local model endpoint unreachable.");
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
   const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const analysisIntervals = useRef<Record<number, NodeJS.Timeout>>({});
@@ -306,6 +360,7 @@ export default function App() {
       let confidence = 0.85;
       let params = "threat_level: low";
 
+      let usedLocalFallback = false;
       if (settings.localModelEnabled) {
         // Local Model Integration (Ollama style)
         try {
@@ -325,12 +380,13 @@ export default function App() {
           const data = await res.json();
           resultText = data.response;
         } catch (fetchErr) {
-          console.error("Local model fetch failed:", fetchErr);
-          addAlert("WARNING", "Local Model Unreachable. Check endpoint.");
-          setIsAnalyzing(prev => ({ ...prev, [cameraId]: false }));
-          return;
+          console.error("Local model fetch failed, temporarily falling back to Gemini:", fetchErr);
+          addAlert("WARNING", "Local Model Unreachable. Temporarily falling back to Gemini Cloud.");
+          usedLocalFallback = true;
         }
-      } else {
+      }
+
+      if (!settings.localModelEnabled || usedLocalFallback) {
         try {
           const response = await ai.models.generateContent({
             model: "gemini-3.1-pro-preview",
@@ -410,21 +466,31 @@ export default function App() {
       }));
 
       let aiMsg = "";
+      let usedLocalChatFallback = false;
       if (settings.localModelEnabled) {
-        const res = await fetch(settings.localModelUrl, {
-          method: "POST",
-          body: JSON.stringify({
-            model: "llama3",
-            prompt: contextPrompt,
-            stream: false,
-            options: {
-              temperature: (settings.humorLevel / 100) * 1.5
-            }
-          })
-        });
-        const data = await res.json();
-        aiMsg = data.response;
-      } else {
+        try {
+          const res = await fetch(settings.localModelUrl, {
+            method: "POST",
+            body: JSON.stringify({
+              model: "llama3",
+              prompt: contextPrompt,
+              stream: false,
+              options: {
+                temperature: (settings.humorLevel / 100) * 1.5
+              }
+            })
+          });
+          if (!res.ok) throw new Error(`Local model returned ${res.status}`);
+          const data = await res.json();
+          aiMsg = data.response;
+        } catch (fetchErr) {
+          console.error("Local chat model fetch failed, temporarily falling back to Gemini:", fetchErr);
+          addAlert("WARNING", "Local Chat Model Unreachable. Temporarily falling back to Gemini Cloud.");
+          usedLocalChatFallback = true;
+        }
+      }
+
+      if (!settings.localModelEnabled || usedLocalChatFallback) {
         const response = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
           contents: [...history, { role: "user", parts: [{ text: contextPrompt }] }],
@@ -693,15 +759,44 @@ export default function App() {
                     />
                   </div>
                   {settings.localModelEnabled && (
-                    <div className="space-y-2">
-                      <Label className="text-[10px] uppercase opacity-60">Local API Endpoint</Label>
-                      <input 
-                        type="text"
-                        className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px] focus:outline-none focus:border-[#00ff41]"
-                        value={settings.localModelUrl}
-                        onChange={(e) => setSettings(s => ({ ...s, localModelUrl: e.target.value }))}
-                        placeholder="http://localhost:11434/api/generate"
-                      />
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase opacity-60">Local API Endpoint</Label>
+                        <input 
+                          type="text"
+                          className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px] focus:outline-none focus:border-[#00ff41]"
+                          value={settings.localModelUrl}
+                          onChange={(e) => {
+                            setSettings(s => ({ ...s, localModelUrl: e.target.value }));
+                            setTestResult(null);
+                          }}
+                          placeholder="http://localhost:11434/api/generate"
+                        />
+                      </div>
+                      
+                      <div className="flex flex-col gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-[#00ff41]/30 text-[#00ff41] hover:bg-[#00ff41]/20 text-[9px] h-7 w-full uppercase flex items-center justify-center gap-2"
+                          onClick={testLocalConnection}
+                          disabled={testingConnection}
+                        >
+                          <RefreshCw className={cn("w-3 h-3", testingConnection && "animate-spin")} />
+                          {testingConnection ? "Analyzing Endpoint Connection..." : "Test Connection"}
+                        </Button>
+                        
+                        {testResult && (
+                          <div className={cn(
+                            "text-[8px] p-2 rounded border leading-relaxed whitespace-pre-wrap font-mono",
+                            testResult.success 
+                              ? "bg-green-950/20 border-green-500/35 text-green-400" 
+                              : "bg-red-950/20 border-red-500/35 text-red-400"
+                          )}>
+                            {testResult.message}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
