@@ -78,6 +78,9 @@ interface ZIONSettings {
   localTtsApiKey: string;
   localTtsModel: string;
   localTtsVoice: string;
+  localTtsType?: "stream" | "request";
+  localTtsMethod?: "POST" | "GET";
+  localTtsJsonKey?: string;
 }
 
 interface CameraState {
@@ -150,6 +153,9 @@ export default function App() {
           localTtsApiKey: "",
           localTtsModel: "kokoro",
           localTtsVoice: "af_bella",
+          localTtsType: "stream",
+          localTtsMethod: "POST",
+          localTtsJsonKey: "input",
           ...parsed
         };
       }
@@ -172,7 +178,10 @@ export default function App() {
       localTtsUrl: "http://localhost:8880/v1/audio/speech",
       localTtsApiKey: "",
       localTtsModel: "kokoro",
-      localTtsVoice: "af_bella"
+      localTtsVoice: "af_bella",
+      localTtsType: "stream",
+      localTtsMethod: "POST",
+      localTtsJsonKey: "input"
     };
   });
 
@@ -252,35 +261,74 @@ export default function App() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-      const res = await fetch(settings.localTtsUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(settings.localTtsApiKey ? { "Authorization": `Bearer ${settings.localTtsApiKey}` } : {})
-        },
-        body: JSON.stringify({
+      let url = settings.localTtsUrl;
+      const method = settings.localTtsMethod || "POST";
+      const jsonKey = settings.localTtsJsonKey || "input";
+      const isStream = settings.localTtsType !== "request";
+
+      const headers: Record<string, string> = {};
+      if (settings.localTtsApiKey) {
+        headers["Authorization"] = `Bearer ${settings.localTtsApiKey}`;
+      }
+
+      let bodyObj: any = null;
+
+      if (isStream) {
+        headers["Content-Type"] = "application/json";
+        bodyObj = {
           model: settings.localTtsModel || "kokoro",
           input: "vocal link authenticated",
           voice: settings.localTtsVoice || "af_bella"
-        }),
+        };
+      } else {
+        // Webhook / Speaker Command / Request Mode
+        if (method === "GET") {
+          const u = new URL(settings.localTtsUrl);
+          u.searchParams.set(jsonKey, "vocal link authenticated");
+          url = u.toString();
+        } else {
+          headers["Content-Type"] = "application/json";
+          bodyObj = {
+            [jsonKey]: "vocal link authenticated"
+          };
+          if (settings.localTtsModel) {
+            bodyObj.model = settings.localTtsModel;
+          }
+          if (settings.localTtsVoice) {
+            bodyObj.voice = settings.localTtsVoice;
+          }
+        }
+      }
+
+      const res = await fetch(url, {
+        method: method,
+        headers: headers,
+        ...(bodyObj ? { body: JSON.stringify(bodyObj) } : {}),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
 
       if (res.ok) {
-        const arrayBuffer = await res.arrayBuffer();
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        
-        const source = audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioContext.destination);
-        source.start();
+        if (isStream) {
+          const arrayBuffer = await res.arrayBuffer();
+          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+          
+          const source = audioContext.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(audioContext.destination);
+          source.start();
 
-        setTtsTestResult({
-          success: true,
-          message: "Speech engine reachable! Local voice synthesized successfully: 'vocal link authenticated'. Playing brief sample.",
-        });
+          setTtsTestResult({
+            success: true,
+            message: "Speech engine reachable! Local audio stream synthesized and played successfully: 'vocal link authenticated'.",
+          });
+        } else {
+          setTtsTestResult({
+            success: true,
+            message: `Speech engine triggered! Dispatched command successfully via ${method} Request. HTTP Status: ${res.status}. Expected voice to speak locally from your server.`,
+          });
+        }
         addAlert("INFO", "Local voice stream synthesized successfully.");
       } else {
         setTtsTestResult({
@@ -775,31 +823,71 @@ You have access to the current camera context provided in the prompt.`
     // --- Try Local Voice/TTS first if enabled ---
     if (settings.localTtsEnabled && settings.localTtsUrl) {
       try {
-        const res = await fetch(settings.localTtsUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(settings.localTtsApiKey ? { "Authorization": `Bearer ${settings.localTtsApiKey}` } : {})
-          },
-          body: JSON.stringify({
+        let url = settings.localTtsUrl;
+        const method = settings.localTtsMethod || "POST";
+        const jsonKey = settings.localTtsJsonKey || "input";
+        const isStream = settings.localTtsType !== "request";
+
+        const headers: Record<string, string> = {};
+        if (settings.localTtsApiKey) {
+          headers["Authorization"] = `Bearer ${settings.localTtsApiKey}`;
+        }
+
+        let bodyObj: any = null;
+
+        if (isStream) {
+          headers["Content-Type"] = "application/json";
+          bodyObj = {
             model: settings.localTtsModel || "kokoro",
             input: text,
             voice: settings.localTtsVoice || "af_bella"
-          })
+          };
+        } else {
+          // Webhook / Speaker Command / Request Mode
+          if (method === "GET") {
+            const u = new URL(settings.localTtsUrl);
+            u.searchParams.set(jsonKey, text);
+            url = u.toString();
+          } else {
+            headers["Content-Type"] = "application/json";
+            bodyObj = {
+              [jsonKey]: text
+            };
+            if (settings.localTtsModel) {
+              bodyObj.model = settings.localTtsModel;
+            }
+            if (settings.localTtsVoice) {
+              bodyObj.voice = settings.localTtsVoice;
+            }
+          }
+        }
+
+        const res = await fetch(url, {
+          method: method,
+          headers: headers,
+          ...(bodyObj ? { body: JSON.stringify(bodyObj) } : {})
         });
+
         if (!res.ok) throw new Error(`Local TTS returned HTTP ${res.status}`);
-        const arrayBuffer = await res.arrayBuffer();
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        const source = audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioContext.destination);
-        source.onended = () => {
+
+        if (isStream) {
+          const arrayBuffer = await res.arrayBuffer();
+          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+          const source = audioContext.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(audioContext.destination);
+          source.onended = () => {
+            isSpeakingRef.current = false;
+            setIsSpeaking(false);
+            audioContext.close();
+          };
+          source.start();
+        } else {
+          // Webhook triggered speaker successfully! Since it plays on their host machine, we are done
           isSpeakingRef.current = false;
           setIsSpeaking(false);
-          audioContext.close();
-        };
-        source.start();
+        }
         return; // Successfully spoke!
       } catch (localTtsErr) {
         console.error("Local TTS failed, falling back to standard methods:", localTtsErr);
@@ -1170,9 +1258,33 @@ You have access to the current camera context provided in the prompt.`
                     />
                   </div>
                   {settings.localTtsEnabled && (
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                       <div className="space-y-1">
-                        <Label className="text-[10px] uppercase opacity-60">Voice API Endpoint</Label>
+                        <Label className="text-[10px] uppercase opacity-60">Speech Integration Type</Label>
+                        <Select 
+                          value={settings.localTtsType || "stream"} 
+                          onValueChange={(v: "stream" | "request") => {
+                            setSettings(s => ({ ...s, localTtsType: v }));
+                            setTtsTestResult(null);
+                          }}
+                        >
+                          <SelectTrigger className="bg-black border-[#00ff41]/20 text-[#00ff41] text-[10px] h-8">
+                            <SelectValue placeholder="Select Integration Type" />
+                          </SelectTrigger>
+                          <SelectContent className="bg-black border-[#00ff41]/20 text-[#00ff41]">
+                            <SelectItem value="stream" className="text-[10px]">Stream Audio to Browser (Ollama/Kokoro/OpenAI)</SelectItem>
+                            <SelectItem value="request" className="text-[10px]">Trigger Local Speaker Webhook (Node/Python speaker server)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[8px] opacity-40 leading-normal">
+                          {settings.localTtsType === "request" 
+                            ? "Hits your local API or custom node speak server, causing your local home device speakers to play sound." 
+                            : "Fetches synthesized audio back to the browser tab for standard user playback."}
+                        </p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase opacity-60">Voice API Endpoint URL</Label>
                         <input 
                           type="text"
                           className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px] focus:outline-none focus:border-[#00ff41]"
@@ -1181,7 +1293,7 @@ You have access to the current camera context provided in the prompt.`
                             setSettings(s => ({ ...s, localTtsUrl: e.target.value }));
                             setTtsTestResult(null);
                           }}
-                          placeholder="http://localhost:8880/v1/audio/speech"
+                          placeholder={settings.localTtsType === "request" ? "http://localhost:5050/speak" : "http://localhost:8880/v1/audio/speech"}
                         />
                       </div>
 
@@ -1192,34 +1304,89 @@ You have access to the current camera context provided in the prompt.`
                           className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px] tracking-widest text-[#00ff41]"
                           value={settings.localTtsApiKey}
                           onChange={(e) => setSettings(s => ({ ...s, localTtsApiKey: e.target.value }))}
-                          placeholder="Optional token (e.g. ElevenLabs, API keys etc.)"
+                          placeholder="Optional Token/API Key if required"
                         />
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="space-y-1">
-                          <Label className="text-[10px] uppercase opacity-60">Voice Model</Label>
-                          <input 
-                            type="text"
-                            className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px]"
-                            value={settings.localTtsModel}
-                            onChange={(e) => setSettings(s => ({ ...s, localTtsModel: e.target.value }))}
-                            placeholder="kokoro"
-                          />
+                      {settings.localTtsType === "request" ? (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <Label className="text-[10px] uppercase opacity-60">Request Method</Label>
+                            <Select 
+                              value={settings.localTtsMethod || "POST"} 
+                              onValueChange={(v: "POST" | "GET") => setSettings(s => ({ ...s, localTtsMethod: v }))}
+                            >
+                              <SelectTrigger className="bg-black border-[#00ff41]/20 text-[#00ff41] text-[10px] h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="bg-black border-[#00ff41]/20 text-[#00ff41]">
+                                <SelectItem value="POST" className="text-[10px]">POST Request</SelectItem>
+                                <SelectItem value="GET" className="text-[10px]">GET Request</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] uppercase opacity-60">JSON Key / Param</Label>
+                            <input 
+                              type="text"
+                              className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px] focus:outline-none focus:border-[#00ff41]"
+                              value={settings.localTtsJsonKey || "input"}
+                              onChange={(e) => setSettings(s => ({ ...s, localTtsJsonKey: e.target.value }))}
+                              placeholder="text / phrase / input"
+                            />
+                          </div>
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-[10px] uppercase opacity-60">Voice Identifier</Label>
-                          <input 
-                            type="text"
-                            className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px]"
-                            value={settings.localTtsVoice}
-                            onChange={(e) => setSettings(s => ({ ...s, localTtsVoice: e.target.value }))}
-                            placeholder="af_bella"
-                          />
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <Label className="text-[10px] uppercase opacity-60">Voice Model Name</Label>
+                            <input 
+                              type="text"
+                              className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px] focus:outline-none"
+                              value={settings.localTtsModel}
+                              onChange={(e) => setSettings(s => ({ ...s, localTtsModel: e.target.value }))}
+                              placeholder="kokoro"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] uppercase opacity-60">Voice Identifier</Label>
+                            <input 
+                              type="text"
+                              className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px] focus:outline-none"
+                              value={settings.localTtsVoice}
+                              onChange={(e) => setSettings(s => ({ ...s, localTtsVoice: e.target.value }))}
+                              placeholder="af_bella"
+                            />
+                          </div>
                         </div>
-                      </div>
+                      )}
 
-                      <div className="flex flex-col gap-2">
+                      {settings.localTtsType === "request" && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <Label className="text-[10px] uppercase opacity-60">Model (Optional)</Label>
+                            <input 
+                              type="text"
+                              className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px] focus:outline-none"
+                              value={settings.localTtsModel}
+                              onChange={(e) => setSettings(s => ({ ...s, localTtsModel: e.target.value }))}
+                              placeholder="kokoro"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] uppercase opacity-60">Voice (Optional)</Label>
+                            <input 
+                              type="text"
+                              className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px] focus:outline-none"
+                              value={settings.localTtsVoice}
+                              onChange={(e) => setSettings(s => ({ ...s, localTtsVoice: e.target.value }))}
+                              placeholder="af_bella"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-2 pt-1">
                         <Button
                           variant="outline"
                           size="sm"
@@ -1228,7 +1395,9 @@ You have access to the current camera context provided in the prompt.`
                           disabled={testingTtsConnection}
                         >
                           <RefreshCw className={cn("w-3 h-3", testingTtsConnection && "animate-spin")} />
-                          {testingTtsConnection ? "Synthesizing Audio stream..." : "Test Speech synthesis"}
+                          {testingTtsConnection 
+                            ? (settings.localTtsType === "request" ? "Dispatched trigger..." : "Synthesizing Audio...") 
+                            : (settings.localTtsType === "request" ? "Test Local Speaker Webhook" : "Test Speech Synthesis Stream")}
                         </Button>
                         
                         {ttsTestResult && (
