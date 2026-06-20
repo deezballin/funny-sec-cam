@@ -69,6 +69,15 @@ interface ZIONSettings {
   voiceVoice: "Zephyr" | "Puck" | "Charon" | "Kore" | "Fenrir";
   localModelEnabled: boolean;
   localModelUrl: string;
+  customApiEnabled: boolean;
+  customApiUrl: string;
+  customApiKey: string;
+  customApiModel: string;
+  localTtsEnabled: boolean;
+  localTtsUrl: string;
+  localTtsApiKey: string;
+  localTtsModel: string;
+  localTtsVoice: string;
 }
 
 interface CameraState {
@@ -118,21 +127,66 @@ export default function App() {
   const [chatInput, setChatInput] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [settings, setSettings] = useState<ZIONSettings>({
-    tone: "mocking",
-    humorLevel: 95,
-    autoDeter: true,
-    customPhrases: "Is that a new shirt or did you lose a bet? // I've seen better posture on a wet noodle. // System scan complete: 100% chance of being a total goofball. // Warning: Approaching the 'No Fun Allowed' zone. Just kidding, I'm the fun!",
-    voiceVoice: "Zephyr",
-    localModelEnabled: false,
-    localModelUrl: "http://localhost:11434/api/generate"
+  
+  const [settings, setSettings] = useState<ZIONSettings>(() => {
+    try {
+      const saved = localStorage.getItem("zion_settings");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          tone: "mocking",
+          humorLevel: 95,
+          autoDeter: true,
+          customPhrases: "Is that a new shirt or did you lose a bet? // I've seen better posture on a wet noodle. // System scan complete: 100% chance of being a total goofball. // Warning: Approaching the 'No Fun Allowed' zone. Just kidding, I'm the fun!",
+          voiceVoice: "Zephyr",
+          localModelEnabled: false,
+          localModelUrl: "http://localhost:11434/api/generate",
+          customApiEnabled: false,
+          customApiUrl: "https://openrouter.ai/api/v1",
+          customApiKey: "",
+          customApiModel: "meta-llama/llama-3-8b-instruct:free",
+          localTtsEnabled: false,
+          localTtsUrl: "http://localhost:8880/v1/audio/speech",
+          localTtsApiKey: "",
+          localTtsModel: "kokoro",
+          localTtsVoice: "af_bella",
+          ...parsed
+        };
+      }
+    } catch (e) {
+      console.warn("Failed to load settings:", e);
+    }
+    return {
+      tone: "mocking",
+      humorLevel: 95,
+      autoDeter: true,
+      customPhrases: "Is that a new shirt or did you lose a bet? // I've seen better posture on a wet noodle. // System scan complete: 100% chance of being a total goofball. // Warning: Approaching the 'No Fun Allowed' zone. Just kidding, I'm the fun!",
+      voiceVoice: "Zephyr",
+      localModelEnabled: false,
+      localModelUrl: "http://localhost:11434/api/generate",
+      customApiEnabled: false,
+      customApiUrl: "https://openrouter.ai/api/v1",
+      customApiKey: "",
+      customApiModel: "meta-llama/llama-3-8b-instruct:free",
+      localTtsEnabled: false,
+      localTtsUrl: "http://localhost:8880/v1/audio/speech",
+      localTtsApiKey: "",
+      localTtsModel: "kokoro",
+      localTtsVoice: "af_bella"
+    };
   });
+
   const [systemStats, setSystemStats] = useState({
     cpu: 0,
     temp: 0,
     mem: 0,
     uptime: "00:00:00"
   });
+
+  // Autosave settings
+  useEffect(() => {
+    localStorage.setItem("zion_settings", JSON.stringify(settings));
+  }, [settings]);
 
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -185,6 +239,70 @@ export default function App() {
       addAlert("WARNING", "Local model endpoint unreachable.");
     } finally {
       setTestingConnection(false);
+    }
+  };
+
+  const [testingTtsConnection, setTestingTtsConnection] = useState(false);
+  const [ttsTestResult, setTtsTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const testLocalTtsConnection = async () => {
+    setTestingTtsConnection(true);
+    setTtsTestResult(null);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+      const res = await fetch(settings.localTtsUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(settings.localTtsApiKey ? { "Authorization": `Bearer ${settings.localTtsApiKey}` } : {})
+        },
+        body: JSON.stringify({
+          model: settings.localTtsModel || "kokoro",
+          input: "vocal link authenticated",
+          voice: settings.localTtsVoice || "af_bella"
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const arrayBuffer = await res.arrayBuffer();
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioContext.destination);
+        source.start();
+
+        setTtsTestResult({
+          success: true,
+          message: "Speech engine reachable! Local voice synthesized successfully: 'vocal link authenticated'. Playing brief sample.",
+        });
+        addAlert("INFO", "Local voice stream synthesized successfully.");
+      } else {
+        setTtsTestResult({
+          success: false,
+          message: `Voice endpoint returned HTTP status ${res.status}. Expected 200 OK.`,
+        });
+      }
+    } catch (err: any) {
+      console.warn("Local TTS test fetch exception:", err);
+      let errorMsg = "Could not reach local Voice LLM/TTS engine. Please check if your local TTS server is running and configured correctly.";
+      if (!settings.localTtsUrl.startsWith("https") && window.location.protocol === "https:") {
+        errorMsg = "Mixed Content block: Cannot fetch insecure 'http' URLs from this HTTPS dashboard. Please use a secure tunnel (e.g. ngrok or local reverse proxy) or allow insecure local host connections in your browser.";
+      } else {
+        errorMsg += " Make sure you started your TTS service with CORS origins enabled.";
+      }
+      setTtsTestResult({
+        success: false,
+        message: errorMsg,
+      });
+      addAlert("WARNING", "Local speech engine unreachable.");
+    } finally {
+      setTestingTtsConnection(false);
     }
   };
 
@@ -360,8 +478,55 @@ export default function App() {
       let confidence = 0.85;
       let params = "threat_level: low";
 
+      let usedCustomFallback = false;
       let usedLocalFallback = false;
-      if (settings.localModelEnabled) {
+
+      // 1. Try Custom API first if enabled
+      if (settings.customApiEnabled && settings.customApiKey) {
+        try {
+          const res = await fetch(`${settings.customApiUrl}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${settings.customApiKey}`,
+              "HTTP-Referer": "https://ai.studio/build",
+              "X-Title": "ZION Sentinel AI"
+            },
+            body: JSON.stringify({
+              model: settings.customApiModel || "google/gemini-2.5-flash",
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: prompt + " \nIMPORTANT: You MUST respond with ONLY a valid, parseable JSON object. No markdown, no backticks, no other text. Keys: analysis, deterrent, confidence (number between 0 and 1), params (string)." },
+                    {
+                      type: "image_url",
+                      image_url: {
+                        url: `data:image/jpeg;base64,${base64Image}`
+                      }
+                    }
+                  ]
+                }
+              ],
+              temperature: 0.7 + (settings.humorLevel / 100) * 0.8
+            })
+          });
+
+          if (!res.ok) throw new Error(`Custom API returned ${res.status}`);
+          const data = await res.json();
+          let content = data.choices?.[0]?.message?.content || "";
+          // Strip possible markdown code block fences
+          content = content.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+          resultText = content;
+        } catch (fetchErr) {
+          console.error("Custom visual API fetch failed, falling back:", fetchErr);
+          addAlert("WARNING", "Custom API Endpoint Unreachable. Falling back to alternative methods.");
+          usedCustomFallback = true;
+        }
+      }
+
+      // 2. Try Local Model if enabled and Custom API either isn't enabled or failed
+      if (settings.localModelEnabled && (!settings.customApiEnabled || usedCustomFallback)) {
         // Local Model Integration (Ollama style)
         try {
           const res = await fetch(settings.localModelUrl, {
@@ -386,10 +551,15 @@ export default function App() {
         }
       }
 
-      if (!settings.localModelEnabled || usedLocalFallback) {
+      // 3. Fallback to default Gemini Cloud
+      if (
+        (!settings.customApiEnabled && !settings.localModelEnabled) || 
+        (settings.customApiEnabled && usedCustomFallback && !settings.localModelEnabled) ||
+        (settings.localModelEnabled && usedLocalFallback)
+      ) {
         try {
           const response = await ai.models.generateContent({
-            model: "gemini-3.1-pro-preview",
+            model: "gemini-3.5-flash",
             contents: [
               {
                 parts: [
@@ -466,8 +636,62 @@ export default function App() {
       }));
 
       let aiMsg = "";
+      let usedCustomChat = false;
       let usedLocalChatFallback = false;
-      if (settings.localModelEnabled) {
+
+      // 1. Try Custom API first if enabled
+      if (settings.customApiEnabled && settings.customApiKey) {
+        try {
+          // Format standard chat completions messages list:
+          const apiMessages = [
+            {
+              role: "system",
+              content: `You are the ZION Sentinel AI, a whimsical and funny office-prank surveillance system. 
+Your tone is ${settings.tone} with a humor level of ${settings.humorLevel}%. 
+Custom phrases to integrate: ${settings.customPhrases}
+You interact with the 'Commander' and 'deter' office-mates with lighthearted, whimsical insults.
+You are NOT a serious security system. You are here for laughs. 
+Keep your responses concise, witty, and office-appropriate. 
+If the user asks you to say something to a 'crook' (office-mate), provide the text and I will speak it.
+You have access to the current camera context provided in the prompt.`
+            },
+            ...chatMessages.map(m => ({
+              role: m.role === "user" ? "user" : "assistant",
+              content: m.text
+            })),
+            {
+              role: "user",
+              content: contextPrompt
+            }
+          ];
+
+          const res = await fetch(`${settings.customApiUrl}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${settings.customApiKey}`,
+              "HTTP-Referer": "https://ai.studio/build",
+              "X-Title": "ZION Sentinel AI"
+            },
+            body: JSON.stringify({
+              model: settings.customApiModel || "google/gemini-2.5-flash",
+              messages: apiMessages,
+              temperature: 0.7 + (settings.humorLevel / 100) * 0.8
+            })
+          });
+
+          if (!res.ok) throw new Error(`Custom chat completion API returned ${res.status}`);
+          const data = await res.json();
+          aiMsg = data.choices?.[0]?.message?.content || "";
+        } catch (fetchErr) {
+          console.error("Custom chat API fetch failed, falling back:", fetchErr);
+          addAlert("WARNING", "Custom Chat API Unreachable. Falling back to alternative methods.");
+          usedCustomChat = true;
+        }
+      }
+
+      // 2. Try Local Model if enabled and Custom API either is disabled or failed
+      if (settings.localModelEnabled && (!settings.customApiEnabled || usedCustomChat)) {
         try {
           const res = await fetch(settings.localModelUrl, {
             method: "POST",
@@ -490,9 +714,14 @@ export default function App() {
         }
       }
 
-      if (!settings.localModelEnabled || usedLocalChatFallback) {
+      // 3. Fallback to Gemini Cloud
+      if (
+        (!settings.customApiEnabled && !settings.localModelEnabled) ||
+        (settings.customApiEnabled && usedCustomChat && !settings.localModelEnabled) ||
+        (settings.localModelEnabled && usedLocalChatFallback)
+      ) {
         const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
+          model: "gemini-3.5-flash",
           contents: [...history, { role: "user", parts: [{ text: contextPrompt }] }],
           config: {
             temperature: 0.7 + (settings.humorLevel / 100) * 0.8,
@@ -542,6 +771,41 @@ export default function App() {
     if (isSpeakingRef.current) return;
     isSpeakingRef.current = true;
     setIsSpeaking(true);
+
+    // --- Try Local Voice/TTS first if enabled ---
+    if (settings.localTtsEnabled && settings.localTtsUrl) {
+      try {
+        const res = await fetch(settings.localTtsUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(settings.localTtsApiKey ? { "Authorization": `Bearer ${settings.localTtsApiKey}` } : {})
+          },
+          body: JSON.stringify({
+            model: settings.localTtsModel || "kokoro",
+            input: text,
+            voice: settings.localTtsVoice || "af_bella"
+          })
+        });
+        if (!res.ok) throw new Error(`Local TTS returned HTTP ${res.status}`);
+        const arrayBuffer = await res.arrayBuffer();
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioContext.destination);
+        source.onended = () => {
+          isSpeakingRef.current = false;
+          setIsSpeaking(false);
+          audioContext.close();
+        };
+        source.start();
+        return; // Successfully spoke!
+      } catch (localTtsErr) {
+        console.error("Local TTS failed, falling back to standard methods:", localTtsErr);
+        addAlert("WARNING", "Local Speech Engine failed. Falling back to Cloud/Native TTS.");
+      }
+    }
 
     try {
       let inflection = "whimsical and playful";
@@ -600,8 +864,37 @@ export default function App() {
         setIsSpeaking(false);
       }
     } catch (err) {
-      isSpeakingRef.current = false;
-      setIsSpeaking(false);
+      console.warn("Gemini TTS failed, falling back to local Browser Web Speech Synthesis:", err);
+      try {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.0;
+        utterance.pitch = 1.05;
+        
+        const voices = window.speechSynthesis.getVoices();
+        // Try to match a native voice corresponding slightly to voiceVoice setting if possible
+        let selectedVoice = null;
+        if (settings.voiceVoice === "Charon" || settings.voiceVoice === "Fenrir") {
+          selectedVoice = voices.find(v => v.name.toLowerCase().includes("male") || v.name.toLowerCase().includes("david") || v.name.toLowerCase().includes("microsoft"));
+        } else {
+          selectedVoice = voices.find(v => v.name.toLowerCase().includes("female") || v.name.toLowerCase().includes("zira") || v.name.toLowerCase().includes("google"));
+        }
+        utterance.voice = selectedVoice || voices[0] || null;
+
+        utterance.onend = () => {
+          isSpeakingRef.current = false;
+          setIsSpeaking(false);
+        };
+        utterance.onerror = () => {
+          isSpeakingRef.current = false;
+          setIsSpeaking(false);
+        };
+        
+        window.speechSynthesis.speak(utterance);
+      } catch (speechErr) {
+        console.error("Local SpeechSynthesis failed:", speechErr);
+        isSpeakingRef.current = false;
+        setIsSpeaking(false);
+      }
     }
   };
 
@@ -754,7 +1047,12 @@ export default function App() {
                     </div>
                     <Switch 
                       checked={settings.localModelEnabled} 
-                      onCheckedChange={(v) => setSettings(s => ({ ...s, localModelEnabled: v }))}
+                      onCheckedChange={(v) => {
+                        setSettings(s => ({ ...s, localModelEnabled: v }));
+                        if (v) {
+                          setSettings(s => ({ ...s, customApiEnabled: false }));
+                        }
+                      }}
                       className="data-[state=checked]:bg-[#00ff41]"
                     />
                   </div>
@@ -794,6 +1092,153 @@ export default function App() {
                               : "bg-red-950/20 border-red-500/35 text-red-400"
                           )}>
                             {testResult.message}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-4 border-t border-[#00ff41]/10 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label className="text-[10px] uppercase opacity-60">Custom API Provider</Label>
+                      <p className="text-[8px] opacity-40 font-semibold text-green-400/80">Support OpenRouter, Together, DeepInfra, etc.</p>
+                    </div>
+                    <Switch 
+                      checked={settings.customApiEnabled} 
+                      onCheckedChange={(v) => {
+                        setSettings(s => ({ ...s, customApiEnabled: v }));
+                        if (v) {
+                          setSettings(s => ({ ...s, localModelEnabled: false }));
+                        }
+                      }}
+                      className="data-[state=checked]:bg-[#00ff41]"
+                    />
+                  </div>
+                  {settings.customApiEnabled && (
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase opacity-60 tracking-wider text-[#00ff41]/80">Custom API Secret Key</Label>
+                        <input 
+                          type="password"
+                          className="w-full bg-black border border-[#00ff41]/30 rounded p-2 text-[10px] tracking-widest text-[#00ff41] focus:outline-none focus:border-[#00ff41]"
+                          value={settings.customApiKey}
+                          onChange={(e) => setSettings(s => ({ ...s, customApiKey: e.target.value }))}
+                          placeholder="Paste API Key (e.g. sk-or-v1-...)"
+                        />
+                        <p className="text-[8px] text-[#00ff41]/40">Your key remains secure on your device and is never stored on external databases.</p>
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase opacity-60">API Base Target (URL)</Label>
+                        <input 
+                          type="text"
+                          className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px] focus:outline-none focus:border-[#00ff41]"
+                          value={settings.customApiUrl}
+                          onChange={(e) => setSettings(s => ({ ...s, customApiUrl: e.target.value }))}
+                          placeholder="https://openrouter.ai/api/v1"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase opacity-60">Target Model Identifier</Label>
+                        <input 
+                          type="text"
+                          className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px] focus:outline-none focus:border-[#00ff41]"
+                          value={settings.customApiModel}
+                          onChange={(e) => setSettings(s => ({ ...s, customApiModel: e.target.value }))}
+                          placeholder="meta-llama/llama-3-8b-instruct:free / google/gemini-2.5-flash"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-4 border-t border-[#00ff41]/10 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label className="text-[10px] uppercase opacity-60">Local Voice Engine (TTS API)</Label>
+                      <p className="text-[8px] opacity-40 font-semibold text-green-400/80">Stream audio dynamically via Local Speech/Vocal LLMs.</p>
+                    </div>
+                    <Switch 
+                      checked={settings.localTtsEnabled} 
+                      onCheckedChange={(v) => {
+                        setSettings(s => ({ ...s, localTtsEnabled: v }));
+                      }}
+                      className="data-[state=checked]:bg-[#00ff41]"
+                    />
+                  </div>
+                  {settings.localTtsEnabled && (
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase opacity-60">Voice API Endpoint</Label>
+                        <input 
+                          type="text"
+                          className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px] focus:outline-none focus:border-[#00ff41]"
+                          value={settings.localTtsUrl}
+                          onChange={(e) => {
+                            setSettings(s => ({ ...s, localTtsUrl: e.target.value }));
+                            setTtsTestResult(null);
+                          }}
+                          placeholder="http://localhost:8880/v1/audio/speech"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label className="text-[10px] uppercase opacity-60">Speech API Secret Token</Label>
+                        <input 
+                          type="password"
+                          className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px] tracking-widest text-[#00ff41]"
+                          value={settings.localTtsApiKey}
+                          onChange={(e) => setSettings(s => ({ ...s, localTtsApiKey: e.target.value }))}
+                          placeholder="Optional token (e.g. ElevenLabs, API keys etc.)"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-[10px] uppercase opacity-60">Voice Model</Label>
+                          <input 
+                            type="text"
+                            className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px]"
+                            value={settings.localTtsModel}
+                            onChange={(e) => setSettings(s => ({ ...s, localTtsModel: e.target.value }))}
+                            placeholder="kokoro"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] uppercase opacity-60">Voice Identifier</Label>
+                          <input 
+                            type="text"
+                            className="w-full bg-black border border-[#00ff41]/20 rounded p-2 text-[10px]"
+                            value={settings.localTtsVoice}
+                            onChange={(e) => setSettings(s => ({ ...s, localTtsVoice: e.target.value }))}
+                            placeholder="af_bella"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-[#00ff41]/30 text-[#00ff41] hover:bg-[#00ff41]/20 text-[9px] h-7 w-full uppercase flex items-center justify-center gap-2"
+                          onClick={testLocalTtsConnection}
+                          disabled={testingTtsConnection}
+                        >
+                          <RefreshCw className={cn("w-3 h-3", testingTtsConnection && "animate-spin")} />
+                          {testingTtsConnection ? "Synthesizing Audio stream..." : "Test Speech synthesis"}
+                        </Button>
+                        
+                        {ttsTestResult && (
+                          <div className={cn(
+                            "text-[8px] p-2 rounded border leading-relaxed whitespace-pre-wrap font-mono",
+                            ttsTestResult.success 
+                              ? "bg-green-950/20 border-green-500/35 text-green-400" 
+                              : "bg-red-950/20 border-red-500/35 text-red-400"
+                          )}>
+                            {ttsTestResult.message}
                           </div>
                         )}
                       </div>
