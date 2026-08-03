@@ -644,9 +644,18 @@ export default function App() {
 
       const parsed = JSON.parse(resultText);
       const cleanAnalysis = parsed.analysis || "";
-      const cleanDeterrent = parsed.deterrent || "";
+      let cleanDeterrent = parsed.deterrent || "";
       confidence = parsed.confidence || 0.85;
       params = parsed.params || "threat_level: unknown";
+
+      if ((cleanAnalysis.toLowerCase().includes("person") || cleanAnalysis.toLowerCase().includes("intruder")) && !cleanDeterrent) {
+        const pool = (settings.customPhrases || "").split("//").map(s => s.trim()).filter(Boolean);
+        if (pool.length) {
+          cleanDeterrent = pool[Math.floor(Math.random() * pool.length)];
+        } else {
+          cleanDeterrent = STANDARD_PHRASES[Math.floor(Math.random() * STANDARD_PHRASES.length)];
+        }
+      }
 
       if (cleanAnalysis.toLowerCase().includes("person") || cleanAnalysis.toLowerCase().includes("intruder")) {
         logEvent(isAuto ? "AUTO_DETECTION" : "MANUAL_SCAN", cleanAnalysis, cameraId, confidence, params);
@@ -993,7 +1002,7 @@ You have access to the current camera context provided in the prompt.`
   }, [chatCameraContext]);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-[#00ff41] font-mono p-4 selection:bg-[#00ff41] selection:text-black">
+    <div className="min-h-screen bg-black text-[#00ff41] font-mono p-4 selection:bg-[#00ff41] selection:text-black">
       {/* Critical Alerts Overlay */}
       <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] w-full max-w-md space-y-2 px-4">
         <AnimatePresence>
@@ -1041,9 +1050,9 @@ You have access to the current camera context provided in the prompt.`
         <div className="flex gap-3 items-center">
           <div className="hidden md:flex items-center gap-2 text-[9px] bg-black/80 border border-[#00ff41]/30 px-3 py-1.5 rounded text-[#00ff41]/90 shadow-[0_0_10px_rgba(0,255,65,0.1)] font-mono">
             <span className="font-bold uppercase tracking-wider text-[#00ff41]">Keys:</span>
-            <span>Focus Cam: <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold">1</kbd> <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold">2</kbd> <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold">3</kbd></span>
+            <span>Focus Cam: <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold text-[#00ff41]">1</kbd> <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold text-[#00ff41]">2</kbd> <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold text-[#00ff41]">3</kbd></span>
             <span className="opacity-40">|</span>
-            <span>Rotate Focused: <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold">←</kbd> <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold">→</kbd> or <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold">R</kbd></span>
+            <span>Rotate Focused: <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold text-[#00ff41]">←</kbd> <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold text-[#00ff41]">→</kbd> or <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold text-[#00ff41]">R</kbd></span>
           </div>
           <Dialog>
             <DialogTrigger render={<Button variant="outline" className="border-[#00ff41]/30 text-[#00ff41] hover:bg-[#00ff41] hover:text-black gap-2" />}>
