@@ -117,6 +117,11 @@
     --sidebar-ring: rgba(0,255,65,0.35);
 }
 
+/* Force terminal theme even if shadcn dark: variants activate */
+.dark, [class*="dark"] {
+  color: #e5ffe5 !important;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
