@@ -1058,7 +1058,7 @@ You have access to the current camera context provided in the prompt.`
             <DialogTrigger render={<Button variant="outline" className="border-[#00ff41]/30 text-[#00ff41] hover:bg-[#00ff41] hover:text-black gap-2" />}>
               <SettingsIcon className="w-4 h-4" /> CONFIG
             </DialogTrigger>
-            <DialogContent className="bg-black border-[#00ff41]/30 text-[#00ff41] max-w-md">
+            <DialogContent className="bg-black border-[#00ff41]/30 text-[#00ff41] max-w-md max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle className="text-[#00ff41] uppercase tracking-widest">ZION_OS Configuration</DialogTitle>
               </DialogHeader>
