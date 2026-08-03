@@ -19,7 +19,9 @@ import {
   Laugh,
   Angry,
   UserCheck,
-  X as XIcon
+  X as XIcon,
+  RotateCw,
+  RotateCcw
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -997,6 +999,59 @@ You have access to the current camera context provided in the prompt.`
     }));
   };
 
+  const rotateCamera = (idx: number, deltaDeg: number) => {
+    setCameraStates(prev => {
+      const current = prev[idx]?.rotation || 0;
+      const nextRot = (current + deltaDeg + 360) % 360;
+      return {
+        ...prev,
+        [idx]: {
+          ...prev[idx],
+          rotation: nextRot
+        }
+      };
+    });
+  };
+
+  // Keyboard Shortcuts for Focused Camera Rotation (Arrow Keys / R) and Selection (1-3)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable ||
+          target.closest('[role="dialog"]'))
+      ) {
+        return;
+      }
+
+      if (e.key === "ArrowRight" || e.key === "ArrowUp" || (e.key.toLowerCase() === "r" && !e.shiftKey)) {
+        e.preventDefault();
+        rotateCamera(chatCameraContext, 90);
+        addAlert("INFO", `CAM_0${chatCameraContext + 1} rotated (+90°)`);
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowDown" || (e.key.toLowerCase() === "r" && e.shiftKey)) {
+        e.preventDefault();
+        rotateCamera(chatCameraContext, -90);
+        addAlert("INFO", `CAM_0${chatCameraContext + 1} rotated (-90°)`);
+      } else if (e.key === "1") {
+        setChatCameraContext(0);
+        addAlert("INFO", "Focused CAM_01");
+      } else if (e.key === "2") {
+        setChatCameraContext(1);
+        addAlert("INFO", "Focused CAM_02");
+      } else if (e.key === "3") {
+        setChatCameraContext(2);
+        addAlert("INFO", "Focused CAM_03");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [chatCameraContext]);
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-[#00ff41] font-mono p-4 selection:bg-[#00ff41] selection:text-black">
       {/* Critical Alerts Overlay */}
@@ -1043,7 +1098,13 @@ You have access to the current camera context provided in the prompt.`
             </p>
           </div>
         </div>
-        <div className="flex gap-4 items-center">
+        <div className="flex gap-3 items-center">
+          <div className="hidden md:flex items-center gap-2 text-[9px] bg-black/80 border border-[#00ff41]/30 px-3 py-1.5 rounded text-[#00ff41]/90 shadow-[0_0_10px_rgba(0,255,65,0.1)] font-mono">
+            <span className="font-bold uppercase tracking-wider text-[#00ff41]">Keys:</span>
+            <span>Focus Cam: <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold">1</kbd> <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold">2</kbd> <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold">3</kbd></span>
+            <span className="opacity-40">|</span>
+            <span>Rotate Focused: <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold">←</kbd> <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold">→</kbd> or <kbd className="px-1 py-0.5 border border-[#00ff41]/40 rounded bg-black font-bold">R</kbd></span>
+          </div>
           <Dialog>
             <DialogTrigger render={<Button variant="outline" className="border-[#00ff41]/30 text-[#00ff41] hover:bg-[#00ff41] hover:text-black gap-2" />}>
               <SettingsIcon className="w-4 h-4" /> CONFIG
@@ -1585,6 +1646,35 @@ You have access to the current camera context provided in the prompt.`
                   </div>
                 </div>
               </div>
+
+              {/* Focused HUD Rotation Control */}
+              {chatCameraContext === idx && (
+                <div className="absolute bottom-2 left-2 z-20 flex items-center gap-1.5 bg-black/85 backdrop-blur-md border border-[#00ff41]/60 px-2.5 py-1 rounded shadow-[0_0_12px_rgba(0,255,65,0.25)] text-[9px] font-mono text-[#00ff41]">
+                  <span className="w-2 h-2 rounded-full bg-[#00ff41] animate-pulse shrink-0" />
+                  <span className="font-bold tracking-wider uppercase text-[9px]">FOCUSED</span>
+                  <span className="opacity-40">|</span>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    className="h-5 w-5 p-0 text-[#00ff41] hover:bg-[#00ff41]/30 hover:text-[#00ff41] border border-[#00ff41]/20 rounded"
+                    onClick={(e) => { e.stopPropagation(); rotateCamera(idx, -90); }}
+                    title="Rotate counter-clockwise (Left/Down Arrow or Shift+R)"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                  </Button>
+                  <span className="font-bold text-[10px] text-[#00ff41] min-w-[28px] text-center">{cameraStates[idx].rotation}°</span>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    className="h-5 w-5 p-0 text-[#00ff41] hover:bg-[#00ff41]/30 hover:text-[#00ff41] border border-[#00ff41]/20 rounded"
+                    onClick={(e) => { e.stopPropagation(); rotateCamera(idx, 90); }}
+                    title="Rotate clockwise (Right/Up Arrow or R)"
+                  >
+                    <RotateCw className="w-3 h-3" />
+                  </Button>
+                  <span className="text-[8px] opacity-70 ml-1 hidden sm:inline text-[#00ff41] font-mono">[← / → / R]</span>
+                </div>
+              )}
 
               <div className="absolute bottom-2 right-2 z-10 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                 <Button 
